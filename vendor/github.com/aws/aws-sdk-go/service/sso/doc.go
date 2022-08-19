@@ -12,7 +12,7 @@
 // API namespaces will continue to retain their original name for backward compatibility
 // purposes. For more information, see Amazon Web Services SSO rename (https://docs.aws.amazon.com/singlesignon/latest/userguide/what-is.html#renamed).
 //
-// This API reference guide describes the Amazon Web Services SSO Portal operations
+// This reference guide describes the Amazon Web Services SSO Portal operations
 // that you can call programatically and includes detailed information on data
 // types and errors.
 //
@@ -28,7 +28,7 @@
 // See sso package documentation for more information.
 // https://docs.aws.amazon.com/sdk-for-go/api/service/sso/
 //
-// Using the Client
+// # Using the Client
 //
 // To contact AWS Single Sign-On with the SDK use the New function to create
 // a new service client. With that client you can make API requests to the service.
