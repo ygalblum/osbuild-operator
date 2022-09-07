@@ -160,6 +160,7 @@ const (
 )
 
 var (
+	resultRequeue      = ctrl.Result{Requeue: true}
 	resultQuickRequeue = ctrl.Result{RequeueAfter: time.Second}
 )
 
@@ -412,11 +413,9 @@ func (r *OSBuildEnvConfigReconciler) Update(ctx context.Context, reqLogger logr.
 		return resultQuickRequeue, nil
 	}
 
-	created, err = r.ensureWorkersExists(ctx, reqLogger, instance, *composerWorkerAPIRouteHost)
-	if err != nil {
-		return ctrl.Result{Requeue: true}, nil
-	} else if created {
-		return resultQuickRequeue, nil
+	requeue := r.ensureWorkersExists(ctx, reqLogger, instance, *composerWorkerAPIRouteHost)
+	if requeue != nil {
+		return *requeue, nil
 	}
 
 	configured, err := r.ensureWorkersConfigured(ctx, reqLogger, instance)
@@ -541,33 +540,33 @@ func (r *OSBuildEnvConfigReconciler) ensureComposerExists(ctx context.Context, r
 	return false, nil
 }
 
-func (r *OSBuildEnvConfigReconciler) ensureWorkersExists(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig, composerWorkerAPIRouteHost string) (bool, error) {
+func (r *OSBuildEnvConfigReconciler) ensureWorkersExists(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig, composerWorkerAPIRouteHost string) *ctrl.Result {
 	created, err := r.ensureWorkerConfigAnsibleConfigExists(ctx, instance)
 	if err != nil {
-		return false, err
+		return &resultRequeue
 	} else if created {
 		reqLogger.Info("Generated ConfigMap for Ansible Config")
-		return true, nil
+		return &resultQuickRequeue
 	}
 
 	created, err = r.ensureOSBuildWorkerConfigExists(ctx, instance)
 	if err != nil {
-		return false, err
+		return &resultRequeue
 	} else if created {
 		reqLogger.Info("Generated ConfigMap for Worker configuration")
-		return true, nil
+		return &resultQuickRequeue
 	}
 
 	for i := range instance.Spec.Workers {
 		created, err = r.ensureWorkerExists(ctx, reqLogger, instance, &instance.Spec.Workers[i], composerWorkerAPIRouteHost)
 		if err != nil {
-			return false, err
+			return &resultRequeue
 		} else if created {
-			return true, nil
+			return &resultQuickRequeue
 		}
 	}
 
-	return false, nil
+	return nil
 }
 
 func (r *OSBuildEnvConfigReconciler) ensureWorkersConfigured(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig) (bool, error) {
