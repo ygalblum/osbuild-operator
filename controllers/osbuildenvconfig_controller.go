@@ -160,6 +160,7 @@ const (
 )
 
 var (
+	resultDone         = ctrl.Result{}
 	resultRequeue      = ctrl.Result{Requeue: true}
 	resultQuickRequeue = ctrl.Result{RequeueAfter: time.Second}
 )
@@ -418,14 +419,6 @@ func (r *OSBuildEnvConfigReconciler) Update(ctx context.Context, reqLogger logr.
 		return *requeue, nil
 	}
 
-	configured, err := r.ensureWorkersConfigured(ctx, reqLogger, instance)
-	if err != nil {
-		return ctrl.Result{Requeue: true}, nil
-	} else if !configured {
-		reqLogger.Info("The workers setup jobs are still running")
-		return ctrl.Result{}, nil
-	}
-
 	reqLogger.Info("The worker setup jobs are done")
 	updated, err := r.updateConditions(ctx, reqLogger, instance, osbuildv1alpha1.ConditionReady)
 	if err != nil {
@@ -558,7 +551,7 @@ func (r *OSBuildEnvConfigReconciler) ensureWorkersExists(ctx context.Context, re
 	}
 
 	for i := range instance.Spec.Workers {
-		created, err = r.ensureWorkerExists(ctx, reqLogger, instance, &instance.Spec.Workers[i], composerWorkerAPIRouteHost)
+		created, err = r.ensureWorkerExists(ctx, reqLogger, instance, &instance.Spec.Workers[i])
 		if err != nil {
 			return &resultRequeue
 		} else if created {
@@ -566,19 +559,34 @@ func (r *OSBuildEnvConfigReconciler) ensureWorkersExists(ctx context.Context, re
 		}
 	}
 
-	return nil
-}
+	for i := range instance.Spec.Workers {
+		isRunning, err := r.ensureWorkerIsRunning(ctx, reqLogger, &instance.Spec.Workers[i])
+		if err != nil {
+			return &resultRequeue
+		} else if !isRunning {
+			return &resultQuickRequeue
+		}
+	}
 
-func (r *OSBuildEnvConfigReconciler) ensureWorkersConfigured(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig) (bool, error) {
+	for i := range instance.Spec.Workers {
+		created, err := r.ensureWorkerSetup(ctx, reqLogger, instance, &instance.Spec.Workers[i], composerWorkerAPIRouteHost)
+		if err != nil {
+			return &resultRequeue
+		} else if created {
+			return &resultQuickRequeue
+		}
+	}
+
 	for i := range instance.Spec.Workers {
 		configured, err := r.ensureWorkerConfigured(ctx, reqLogger, instance, &instance.Spec.Workers[i])
 		if err != nil {
-			return false, err
+			return &resultRequeue
 		} else if !configured {
-			return false, nil
+			return &resultDone
 		}
 	}
-	return true, nil
+
+	return nil
 }
 
 func (r *OSBuildEnvConfigReconciler) ensureWorkerConfigured(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig, worker *osbuildv1alpha1.WorkerConfig) (bool, error) {
@@ -600,45 +608,61 @@ func (r *OSBuildEnvConfigReconciler) ensureWorkerConfigured(ctx context.Context,
 	return false, nil
 }
 
-func (r *OSBuildEnvConfigReconciler) ensureWorkerExists(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig, worker *osbuildv1alpha1.WorkerConfig, composerWorkerAPIRouteHost string) (bool, error) {
+func (r *OSBuildEnvConfigReconciler) ensureWorkerExists(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig, worker *osbuildv1alpha1.WorkerConfig) (bool, error) {
+	if worker.VMWorkerConfig == nil {
+		return false, nil
+	}
+
+	created, err := r.ensureWorkerSSHKeysSecretExists(ctx, instance)
+	if err != nil {
+		return false, err
+	} else if created {
+		reqLogger.Info("Generated Secret for SSH Keys")
+		return true, nil
+	}
+
+	created, err = r.ensureWorkerVMExists(ctx, worker, instance)
+	if err != nil {
+		return false, err
+	} else if created {
+		reqLogger.Info("Generated VM for Worker", "name", worker.Name)
+		return true, nil
+	}
+
+	created, err = r.ensureWorkerVMSSHServiceExists(ctx, worker.Name, instance)
+	if err != nil {
+		return false, err
+	} else if created {
+		reqLogger.Info("Generated SSH Service for Worker", "name", worker.Name)
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerIsRunning(ctx context.Context, reqLogger logr.Logger, worker *osbuildv1alpha1.WorkerConfig) (bool, error) {
+	if worker.VMWorkerConfig == nil {
+		return true, nil
+	}
+
+	ready, err := r.ensureWorkerVMIsReady(ctx, worker.Name)
+	if err != nil {
+		return false, err
+	} else if !ready {
+		reqLogger.Info("Worker VM is not ready yet", "name", worker.Name)
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerSetup(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig, worker *osbuildv1alpha1.WorkerConfig, composerWorkerAPIRouteHost string) (bool, error) {
 	var workerAddress string
 	var workerUser string
 	var workerSSHKeySecretName string
 	var workerAPIAddress string
 
 	if worker.VMWorkerConfig != nil {
-		created, err := r.ensureWorkerSSHKeysSecretExists(ctx, instance)
-		if err != nil {
-			return false, err
-		} else if created {
-			reqLogger.Info("Generated Secret for SSH Keys")
-			return true, nil
-		}
-
-		created, err = r.ensureWorkerVMExists(ctx, worker, instance)
-		if err != nil {
-			return false, err
-		} else if created {
-			reqLogger.Info("Generated VM for Worker", "name", worker.Name)
-			return true, nil
-		}
-
-		created, err = r.ensureWorkerVMSSHServiceExists(ctx, worker.Name, instance)
-		if err != nil {
-			return false, err
-		} else if created {
-			reqLogger.Info("Generated SSH Service for Worker", "name", worker.Name)
-			return true, nil
-		}
-
-		ready, err := r.ensureWorkerVMIsReady(ctx, worker.Name)
-		if err != nil {
-			return false, err
-		} else if !ready {
-			reqLogger.Info("Worker VM is not ready yet", "name", worker.Name)
-			return true, nil
-		}
-
 		workerAddress = fmt.Sprintf(workerSSHServiceNameFormat, worker.Name)
 		workerUser = workerVMUsername
 		workerSSHKeySecretName = workerSSHKeysSecretName
