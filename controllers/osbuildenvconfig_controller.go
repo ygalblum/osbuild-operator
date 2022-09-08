@@ -367,6 +367,7 @@ func (r *OSBuildEnvConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&osbuildv1alpha1.OSBuildEnvConfig{}).
 		Owns(&batchv1.Job{}, builder.WithPredicates(predicates.OSBuildEnvConfigJobFinished{})).
+		Owns(&kubevirtv1.VirtualMachine{}).
 		Complete(r)
 }
 
@@ -564,7 +565,7 @@ func (r *OSBuildEnvConfigReconciler) ensureWorkersExists(ctx context.Context, re
 		if err != nil {
 			return &resultRequeue
 		} else if !isRunning {
-			return &resultQuickRequeue
+			return &resultDone
 		}
 	}
 

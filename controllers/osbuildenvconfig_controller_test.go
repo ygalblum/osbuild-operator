@@ -1310,7 +1310,7 @@ var _ = Describe("OSBuildEnvConfig Controller", func() {
 																				result, err := reconciler.Reconcile(requestContext, request)
 																				// then
 																				Expect(err).To(BeNil())
-																				Expect(result).To(Equal(resultQuickRequeue))
+																				Expect(result).To(Equal(resultDone))
 																			})
 
 																			Context("Internal worker VM is ready", func() {
