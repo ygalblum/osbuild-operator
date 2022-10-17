@@ -83,6 +83,12 @@ func (f FlagsByName) Swap(i, j int) {
 	f[i], f[j] = f[j], f[i]
 }
 
+// ActionableFlag is an interface that wraps Flag interface and RunAction operation.
+type ActionableFlag interface {
+	Flag
+	RunAction(*Context) error
+}
+
 // Flag is a common interface related to parsing flags in cli.
 // For more advanced flag parsing techniques, it is recommended that
 // this interface be implemented.
@@ -123,6 +129,14 @@ type DocGenerationFlag interface {
 	GetEnvVars() []string
 }
 
+// DocGenerationSliceFlag extends DocGenerationFlag for slice-based flags.
+type DocGenerationSliceFlag interface {
+	DocGenerationFlag
+
+	// IsSliceFlag returns true for flags that can be given multiple times.
+	IsSliceFlag() bool
+}
+
 // VisibleFlag is an interface that allows to check if a flag is visible
 type VisibleFlag interface {
 	Flag
@@ -137,6 +151,12 @@ type CategorizableFlag interface {
 	VisibleFlag
 
 	GetCategory() string
+}
+
+// Countable is an interface to enable detection of flag values which support
+// repetitive flags
+type Countable interface {
+	Count() int
 }
 
 func flagSet(name string, flags []Flag) (*flag.FlagSet, error) {
@@ -313,24 +333,13 @@ func stringifyFlag(f Flag) string {
 
 	usageWithDefault := strings.TrimSpace(usage + defaultValueString)
 
-	return withEnvHint(df.GetEnvVars(),
-		fmt.Sprintf("%s\t%s", prefixedNames(df.Names(), placeholder), usageWithDefault))
-}
-
-func stringifySliceFlag(usage string, names, defaultVals []string) string {
-	placeholder, usage := unquoteUsage(usage)
-	if placeholder == "" {
-		placeholder = defaultPlaceholder
+	pn := prefixedNames(df.Names(), placeholder)
+	sliceFlag, ok := f.(DocGenerationSliceFlag)
+	if ok && sliceFlag.IsSliceFlag() {
+		pn = pn + " [ " + pn + " ]"
 	}
 
-	defaultVal := ""
-	if len(defaultVals) > 0 {
-		defaultVal = fmt.Sprintf(formatDefault("%s"), strings.Join(defaultVals, ", "))
-	}
-
-	usageWithDefault := strings.TrimSpace(fmt.Sprintf("%s%s", usage, defaultVal))
-	pn := prefixedNames(names, placeholder)
-	return fmt.Sprintf("%s [ %s ]\t%s", pn, pn, usageWithDefault)
+	return withEnvHint(df.GetEnvVars(), fmt.Sprintf("%s\t%s", pn, usageWithDefault))
 }
 
 func hasFlag(flags []Flag, fl Flag) bool {
